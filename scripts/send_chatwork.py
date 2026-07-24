@@ -8,8 +8,8 @@ Chatworkの「マイチャット」にテキストメッセージを送信する
 import os
 import requests
 
-ROOM_ID = "434416940"  # マイチャット
-MESSAGES_URL = f"https://api.chatwork.com/v2/rooms/{ROOM_ID}/messages"
+MY_CHAT_ROOM_ID = "434416940"  # マイチャット
+INFO_CHANNEL_ROOM_ID = "436582437"  # 【情報チャネル】
 
 # Chatworkの1メッセージあたりの文字数上限に合わせて分割する目安
 MAX_LEN = 4500
@@ -27,12 +27,13 @@ def _split_text(text: str, max_len: int = MAX_LEN):
     return chunks
 
 
-def send_chatwork_message(text: str) -> None:
+def send_chatwork_message(text: str, room_id: str = MY_CHAT_ROOM_ID) -> None:
     token = os.environ["CHATWORK_API_TOKEN"]
+    messages_url = f"https://api.chatwork.com/v2/rooms/{room_id}/messages"
 
     for chunk in _split_text(text):
         resp = requests.post(
-            MESSAGES_URL,
+            messages_url,
             headers={"X-ChatWorkToken": token},
             data={"body": f"【NS】{chunk}"},
             timeout=30,
