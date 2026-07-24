@@ -51,6 +51,11 @@ KEIRI_SNAPSHOT_NAME = "keiri_snapshot.json"
 NS_PREFIX = "【NS】"
 INBOX_RETENTION_DAYS = 2
 
+# 注意: ChatworkのforceパラメータはAPIトークン単位の共有カーソルを使っている。
+# force=1(スナップショット取得)を呼ぶとforce=0の差分カーソルも進んでしまうため、
+# このスクリプト以外(手動curlなど)で同じトークンのforce=0/1を呼ぶと、
+# 次回のforce=0差分取得で新着メッセージを取りこぼす。デバッグ時は要注意。
+
 
 def _get_access_token() -> str:
     resp = requests.post(
@@ -127,6 +132,9 @@ def _get_chatwork_messages(room_id: str, force: int = 0):
         timeout=30,
     )
     resp.raise_for_status()
+    if resp.status_code == 204 or not resp.text:
+        # force=0で新着が0件のときChatworkは204(本文なし)を返す
+        return []
     return resp.json()
 
 
