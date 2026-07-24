@@ -23,7 +23,10 @@ GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET として登録する。
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/drive",
+]
 
 
 def main():
