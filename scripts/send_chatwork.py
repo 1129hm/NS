@@ -10,6 +10,7 @@ import requests
 
 MY_CHAT_ROOM_ID = "434416940"  # マイチャット
 INFO_CHANNEL_ROOM_ID = "436582437"  # 【情報チャネル】
+PERSONAL_ROOM_ID = "443042144"  # 「1129」(三幸さん個人アカウントとの1対1)
 
 # Chatworkの1メッセージあたりの文字数上限に合わせて分割する目安
 MAX_LEN = 4500

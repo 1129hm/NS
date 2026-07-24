@@ -1,0 +1,32 @@
+name: Stock News
+
+on:
+  schedule:
+    # 日本時間 08:30(朝、日本市場の寄り付き前)
+    - cron: "30 23 * * *"
+    # 日本時間 15:30(日中、日本市場の引け後)
+    - cron: "30 6 * * *"
+    # 日本時間 23:00(夜、米国市場の寄り付き後)
+    - cron: "0 14 * * *"
+  workflow_dispatch: {}   # 手動実行もできるようにしておく(テスト用)
+
+jobs:
+  send-stock-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run stock news
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_API_TOKEN }}
+        run: python stock_news.py
