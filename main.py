@@ -8,7 +8,7 @@
 import datetime
 from scripts.fetch_news import fetch_news_summary
 from scripts.fetch_calendar import fetch_today_events_summary
-from scripts.send_line import send_line_message
+from scripts.send_chatwork import send_chatwork_message
 
 
 def build_message() -> str:
@@ -27,7 +27,7 @@ def build_message() -> str:
 
 def main() -> None:
     message = build_message()
-    send_line_message(message)
+    send_chatwork_message(message)
     print("送信完了")
     print(message)
 
