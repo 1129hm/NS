@@ -1,14 +1,10 @@
 name: Stock News
 
 on:
-  schedule:
-    # 日本時間 08:30(朝、日本市場の寄り付き前)
-    - cron: "30 23 * * *"
-    # 日本時間 15:30(日中、日本市場の引け後)
-    - cron: "30 6 * * *"
-    # 日本時間 23:00(夜、米国市場の寄り付き後)
-    - cron: "0 14 * * *"
-  workflow_dispatch: {}   # 手動実行もできるようにしておく(テスト用)
+  # 2026-07-23: 自動配信を停止。Claude Routine版(kabu-check-*)が同じ内容・同じ時間帯を
+  # 担っており、両方が同じChatworkルームに二重送信していたため。手動実行(workflow_dispatch)
+  # は残してあるので、必要ならActionsタブから随時実行できる。
+  workflow_dispatch: {}
 
 jobs:
   send-stock-news:
