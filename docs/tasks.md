@@ -1,6 +1,6 @@
 # 定期タスク一覧
 
-NSが担っている定期実行タスクの現状（2026-07-23 棚卸し時点）。増減があったら都度ここを更新する（月1回の棚卸しの起点にする）。
+NSが担っている定期実行タスクの現状（2026-07-28 更新時点）。増減があったら都度ここを更新する（月1回の棚卸しの起点にする）。
 
 ## 全体構成
 
@@ -24,22 +24,23 @@ LINEだけは例外で、`NS LINE会話`のみ専用のCloudflare Worker（`ns-l
 
 | ワークフロー | 実行タイミング | 内容 |
 |---|---|---|
-| Morning Brief (`morning_brief.yml`) | 毎日 7:00(JST) | カレンダー予定+ニュース要約を **LINEに直接** 配信(`send_line.py`) |
+| Morning Brief (`morning_brief.yml`) | 手動実行のみ(2026-07-28に自動配信を停止) | ニュース要約をChatwork「【情報チャネル】」へ配信(`main.py`/`send_chatwork.py`)。GitHub Actionsの`schedule`が数時間〜半日単位で遅延する問題が見つかり、Claude Routine版`news-info-channel-0700-jst`に置き換えたため停止 |
 | Stock News (`stock_news.yml`) | 手動実行のみ(2026-07-23に自動配信を停止) | 株ニュースをChatworkへ。Claude Routine版`kabu-check-*`と内容・時間帯が重複していたため停止 |
 | Chatwork Relay (`chatwork_relay.yml`) | 15分おき | Drive⇔Chatworkの中継(受信ミラー・経理スナップショット・送信・古いファイル掃除)。他のほぼ全ルーティンの基盤 |
 
-## Claude Routine（claude.ai/code/routines、9個）
+> 補足: GitHub Actionsの`schedule`トリガーは混雑状況により実行が大きく遅延することがある(実測で数時間〜半日程度)。時間の正確さが重要な定期配信は、Claude Routine側に寄せる方針とする(実測ではおよそ10〜15分程度のズレに収まっている)。
 
-### 通知系(読み取り専用レポート、Chatwork「1129」へ)
+## Claude Routine（claude.ai/code/routines、10個）
 
-| ルーティン名 | 実行タイミング | 内容 |
-|---|---|---|
-| NS 朝の予定通知 | 毎日 7:00(JST) | 当日のGoogleカレンダー予定を通知 |
-| kabu-check-morning-7am-jst | 平日 7:00(JST) | 米国市況・為替の朝レポート(初心者向け、翌日3択予想付き) |
-| kabu-check-jpclose-1530-jst | 平日 15:30(JST) | 日経平均終値レポート(理解度チェッククイズ付き) |
-| kabu-check-usopen-2300-jst | 平日 23:00(JST) | 米国市場寄り付き速報 |
+### 通知系(読み取り専用レポート)
 
-> 軽微な要確認: 「NS 朝の予定通知」(Chatwork)と「Morning Brief」(LINE、GitHub Actions)が同じ7:00(JST)にカレンダー情報を配信している。内容(ニュース有無)と経路(Chatwork/LINE)は違うが、重複感がないか三幸さんに確認する。
+| ルーティン名 | 実行タイミング | 内容 | 送信先 |
+|---|---|---|---|
+| NS 朝の予定通知 | 毎日 7:00(JST) | 当日のGoogleカレンダー予定を通知 | Chatwork「1129」 |
+| news-info-channel-0700-jst | 毎日 7:00(JST) | 人材/人事労務/AI/建設/不動産/政治などのニュース要約(旧Morning Brief) | Chatwork「【情報チャネル】」 |
+| kabu-check-morning-7am-jst | 平日 7:00(JST) | 米国市況・為替の朝レポート(初心者向け、翌日3択予想付き) | Chatwork「1129」 |
+| kabu-check-jpclose-1530-jst | 平日 15:30(JST) | 日経平均終値レポート(理解度チェッククイズ付き) | Chatwork「1129」 |
+| kabu-check-usopen-2300-jst | 平日 23:00(JST) | 米国市場寄り付き速報 | Chatwork「1129」 |
 
 ### 判断・対話系(右腕業務。下書き作成・仮予定登録まで。送信・確定は三幸さんが行う)
 
@@ -69,5 +70,6 @@ LINEだけは例外で、`NS LINE会話`のみ専用のCloudflare Worker（`ns-l
 - 2026-07-23: 棚卸しを実施。以下を解消
   - 株ニュースの二重送信(`stock_news.yml`の自動配信を停止し、Claude Routine版`kabu-check-*`に一本化)
   - テスト用ルーティン`NS_TEST_delete_me`(Chatworkトークンが平文で残存)と`接続調査_webhook`を削除、Chatworkトークンをローテーション
-- 最終更新: 2026-07-23
-- 次回棚卸し目安: 2026-08-23ごろ(月1回、稼働中タスクの重複・放置がないか確認)
+- 2026-07-28: 「情報チャネル」へのニュースが実質届いていない(数時間〜半日遅延)問題を調査。GitHub Actionsの`schedule`遅延が原因と判明し、`news-info-channel-0700-jst`(Claude Routine)に置き換え、`morning_brief.yml`の自動配信を停止
+- 最終更新: 2026-07-28
+- 次回棚卸し目安: 2026-08-28ごろ(月1回、稼働中タスクの重複・放置がないか確認)
