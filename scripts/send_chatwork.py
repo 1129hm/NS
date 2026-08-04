@@ -10,7 +10,10 @@ import requests
 
 MY_CHAT_ROOM_ID = "434416940"  # マイチャット
 INFO_CHANNEL_ROOM_ID = "436582437"  # 【情報チャネル】
-PERSONAL_ROOM_ID = "443042144"  # 「1129」(三幸さん個人アカウントとの1対1)
+PERSONAL_ROOM_ID = "443042144"  # 「1129」(三幸秀稔との1対1)。
+# 注意: stock_news.py(手動実行のみ、自動配信は停止済み)がこの定数を使うが、
+# ここではCHATWORK_API_TOKEN(三幸秀稔自身のトークン)で送信するため、
+# chatwork_relay.py経由(1129アカウントのトークンで送信)とは送信元が異なる。
 
 # Chatworkの1メッセージあたりの文字数上限に合わせて分割する目安
 MAX_LEN = 4500

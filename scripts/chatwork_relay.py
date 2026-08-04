@@ -20,7 +20,14 @@ Claude Routineの実行環境からはapi.chatwork.comへの直接アクセス�
   GOOGLE_CLIENT_ID
   GOOGLE_CLIENT_SECRET
   GOOGLE_REFRESH_TOKEN   (Driveスコープ付きで取得したもの)
-  CHATWORK_API_TOKEN
+  CHATWORK_API_TOKEN         (三幸秀稔アカウント。経理/情報チャネル等の業務ルームの読み書き用)
+  CHATWORK_API_TOKEN_1129    (1129アカウント。三幸秀稔への一般的な右腕通知の送信元)
+  CHATWORK_API_TOKEN_KABUNS  (株NSアカウント。三幸秀稔への株関連レポートの送信元)
+
+送信先が三幸秀稔への1対1DM(1129宛て/株NS宛て)の場合のみ、その相手アカウント自身の
+トークンで送信する(三幸秀稔からは「新着メッセージ」として届くようにするため)。
+それ以外の業務ルーム(経理・情報チャネル等)は、これまで通り三幸秀稔アカウントの
+トークンで読み書きする(三幸秀稔がその部屋のメンバーであるため)。
 """
 
 import os
@@ -50,6 +57,12 @@ KEIRI_SNAPSHOT_NAME = "keiri_snapshot.json"
 
 NS_PREFIX = "【NS】"
 INBOX_RETENTION_DAYS = 2
+
+# 三幸秀稔への1対1DMは、相手アカウント自身のトークンで送信する(新着として届かせるため)
+TOKEN_ENV_BY_ROOM = {
+    "443042144": "CHATWORK_API_TOKEN_1129",     # 1129 → 三幸秀稔
+    "443123712": "CHATWORK_API_TOKEN_KABUNS",   # 株NS → 三幸秀稔
+}
 
 # 注意: ChatworkのforceパラメータはAPIトークン単位の共有カーソルを使っている。
 # force=1(スナップショット取得)を呼ぶとforce=0の差分カーソルも進んでしまうため、
@@ -139,7 +152,8 @@ def _get_chatwork_messages(room_id: str, force: int = 0):
 
 
 def _post_to_chatwork(room_id: str, body: str) -> None:
-    token = os.environ["CHATWORK_API_TOKEN"]
+    token_env = TOKEN_ENV_BY_ROOM.get(room_id, "CHATWORK_API_TOKEN")
+    token = os.environ[token_env]
     resp = requests.post(
         f"https://api.chatwork.com/v2/rooms/{room_id}/messages",
         headers={"X-ChatWorkToken": token},
