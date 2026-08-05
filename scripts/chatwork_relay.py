@@ -164,10 +164,18 @@ def _post_to_chatwork(room_id: str, body: str) -> None:
 
 
 def relay_inbound_mirror(access_token: str) -> int:
-    """監視対象ルームの新着メッセージ(NS自身の返信を除く)を受信箱に保存する。"""
+    """監視対象ルームの新着メッセージ(NS自身の返信を除く)を受信箱に保存する。
+
+    1ルームの取得に失敗しても、他のルームの処理やこの後の送信処理まで
+    止めないよう、ルームごとにエラーを握りつぶして続行する。
+    """
     total = 0
     for room_id in WATCHED_ROOMS:
-        messages = _get_chatwork_messages(room_id, force=0)
+        try:
+            messages = _get_chatwork_messages(room_id, force=0)
+        except requests.exceptions.HTTPError as e:
+            print(f"警告: ルーム{room_id}({WATCHED_ROOMS[room_id]})の受信取得に失敗、スキップ: {e}")
+            continue
         new_messages = [m for m in messages if not m.get("body", "").startswith(NS_PREFIX)]
 
         for m in new_messages:
@@ -193,8 +201,15 @@ def relay_inbound_mirror(access_token: str) -> int:
 
 
 def relay_keiri_snapshot(access_token: str) -> None:
-    """経理ルームの直近メッセージ全件を1ファイルに保存し直す(月末締め用)。"""
-    messages = _get_chatwork_messages(KEIRI_ROOM_ID, force=1)
+    """経理ルームの直近メッセージ全件を1ファイルに保存し直す(月末締め用)。
+
+    失敗してもこの後の処理(掃除など)を止めないよう、ここでエラーを握りつぶす。
+    """
+    try:
+        messages = _get_chatwork_messages(KEIRI_ROOM_ID, force=1)
+    except requests.exceptions.HTTPError as e:
+        print(f"警告: 経理ルームのスナップショット取得に失敗、スキップ: {e}")
+        return
 
     existing = _list_folder_files(
         access_token, SNAPSHOT_FOLDER_ID, extra_query=f"name = '{KEIRI_SNAPSHOT_NAME}'"
@@ -207,8 +222,13 @@ def relay_keiri_snapshot(access_token: str) -> None:
 
 
 def relay_outbound(access_token: str) -> int:
-    """送信待ちフォルダにあるファイルをChatworkに投稿し、削除する。"""
+    """送信待ちフォルダにあるファイルをChatworkに投稿し、削除する。
+
+    1件の送信に失敗しても、他の送信待ちファイルの処理を止めずに続行する
+    (失敗したファイルは削除せず、次回以降に再送を試みる)。
+    """
     files = _list_folder_files(access_token, OUTBOX_FOLDER_ID)
+    sent = 0
 
     for f in files:
         content = _download_file(access_token, f["id"])
@@ -216,11 +236,17 @@ def relay_outbound(access_token: str) -> int:
         room_id = str(data["room_id"])
         body = data["body"]
 
-        _post_to_chatwork(room_id, body)
+        try:
+            _post_to_chatwork(room_id, body)
+        except (requests.exceptions.HTTPError, KeyError) as e:
+            print(f"警告: {f['name']} -> room {room_id} の送信に失敗、次回リトライ: {e}")
+            continue
+
         _delete_file(access_token, f["id"])
         print(f"送信完了: {f['name']} -> room {room_id}")
+        sent += 1
 
-    return len(files)
+    return sent
 
 
 def cleanup_old_inbox_files(access_token: str) -> int:
@@ -240,9 +266,11 @@ def cleanup_old_inbox_files(access_token: str) -> int:
 def main() -> None:
     access_token = _get_access_token()
 
+    # 送信(outbound)を最初に行う。三幸さんへ届くべき通知が、他の処理の失敗で
+    # ブロックされないようにするため(各関数も個別のエラーでは全体を止めない設計)。
+    outbound_count = relay_outbound(access_token)
     inbound_count = relay_inbound_mirror(access_token)
     relay_keiri_snapshot(access_token)
-    outbound_count = relay_outbound(access_token)
     cleaned_count = cleanup_old_inbox_files(access_token)
 
     print(
