@@ -1,10 +1,11 @@
 name: Chatwork Relay
 
 on:
-  schedule:
-    # 15分おきに、Driveの送信待ちフォルダを確認してChatworkへ配送する
-    - cron: "*/15 * * * *"
-  workflow_dispatch: {}   # 手動実行もできるようにしておく(テスト用)
+  # 2026-08-05: 自動配信を停止。GitHub ActionsからChatwork APIへのアクセスが
+  # 403 Forbiddenで拒否されるようになり(原因未特定)、中継が機能しなくなったため。
+  # Cloudflare Worker(ns-chatwork-relay)経由でClaude Routineから直接Chatworkに
+  # アクセスする方式に置き換えた。手動実行(workflow_dispatch)のみ残す。
+  workflow_dispatch: {}
 
 jobs:
   relay:
