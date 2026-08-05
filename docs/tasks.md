@@ -4,22 +4,30 @@ NSが担っている定期実行タスクの現状（2026-08-05 更新時点）�
 
 ## 全体構成
 
-Claude Routine（claude.ai/code/routines）はクラウドサンドボックスで動くため、`api.chatwork.com`や`api.line.me`への直接アクセスができない。そのため、Chatwork・LINEとのやり取りは、どちらも **Cloudflare Workerを中継役にして直接curlで呼ぶ** 方式に統一されている(Google Drive・GitHub Actions経由の中継は2026-08-05に廃止)。
+Claude Routine（claude.ai/code/routines）はクラウドサンドボックスで動くため、`api.chatwork.com`や外部の任意ドメインへの直接アクセスができない(組織のegressポリシーでアウトバウンド接続先が許可リスト制になっており、Anthropic自身のインフラと、MCP接続済みのGoogle Gmail/Calendar/Driveしか到達できない。自前で立てたCloudflare Workerも例外なくブロックされることを2回の実地検証で確認済み)。そのため、Chatworkとのやり取りは **Google Driveを中継地点にする方式** で行っている。
 
 ```
-Claude Routine ──(Bashからcurlで直接呼ぶ)──> Cloudflare Worker「ns-line-relay」 ──> Chatwork / LINE API
+Claude Routine ──(Google Drive MCPで読み書き)──> Google Drive
+                                                       │
+                                 Cron Trigger(5分おき) │
+                                                       ▼
+                                 Cloudflare Worker「ns-line-relay」の scheduled ハンドラ
+                                                       │
+                                                       ▼
+                                                 Chatwork API
 ```
 
-Chatwork・LINEどちらも **単一のCloudflare Worker `ns-line-relay.m-hidetoshi1129.workers.dev`** が中継する(2026-08-05にChatwork機能を統合)。
+- ルーティンは送信したい内容を`{"room_id": "...", "body": "..."}`というJSONファイルとして、Google Driveの送信待ちフォルダ(`14v1e48XwXAe18OB-6CNjf8BSuqWYJ4IZ`)に`create_file`で保存するだけでよい。`token_key`の指定は不要(Worker側の`tokenKeyForRoom()`がroom_idから自動判定する)。
+- Cloudflare Worker `ns-line-relay.m-hidetoshi1129.workers.dev` のCron Trigger(5分おき)が、送信待ちフォルダを見て実際にChatworkへPOSTし、ファイルを削除する。同時に、監視対象ルームの新着メッセージを受信箱フォルダ(`1f7OgjQ7OClu6OYKBh-Iptcxay3DOwijN`)にミラーし、経理ルームのスナップショットをスナップショットフォルダ(`1OOBa8kiJ6wcD3ophYR52z9wm2EwKsz8v`)に保存する。
+- ルーティン側が新着メッセージを読みたい場合は、受信箱フォルダを`search_files`で検索し(`title contains 'inbox_<room_id>_'`)、`read_file_content`で読む。
+- LINE用の`/push`(Webhook受信含む)は元の設計のまま変更なし。
 
-- LINE用: `/push`(既存)、Webhook受信(既存)
-- Chatwork用: `/chatwork/send`、`/chatwork/messages`(2026-08-05追加、要`RELAY_SECRET`認証)
+コードは`cloudflare/ns-line-relay.js`に保存(デプロイはCloudflareダッシュボードの「Edit code」から手動貼り付け。このリポジトリからの自動デプロイは未設定)。
 
-コードは`cloudflare/ns-line-relay.js`に保存(デプロイはCloudflareダッシュボードから手動。このリポジトリからの自動デプロイは未設定)。
-
-**経緯(2段階で変化した)**:
+**経緯(3段階で変化した)**:
 1. 当初はGoogle Drive経由(Claude RoutineがDriveに書き込み→GitHub Actionsが15分おきにポーリングしてChatworkへ)だったが、①GitHub Actionsのscheduleが数時間〜半日遅延する、②2026-08-03頃からGitHub ActionsからのChatwork APIアクセス自体が403 Forbiddenで拒否されるようになった、という2つの問題が発生
-2. そこでChatwork専用の新しいCloudflare Worker(`ns-chatwork-relay`という別ドメイン)を作ったが、Claude Routineの実行環境は組織のegressポリシーでアウトバウンド接続先が許可リスト制になっており、この新しいドメインへの接続が403で拒否された。一方、LINE中継用の`ns-line-relay`は既に許可リストに入っていたため、**別Workerを新設するのではなく、`ns-line-relay`に`/chatwork/*`エンドポイントを追加する形**に変更して解決した。`ns-chatwork-relay`Worker自体はCloudflare上に残っているが未使用
+2. そこでChatwork専用の新しいCloudflare Worker(`ns-chatwork-relay`という別ドメイン)を作り、ルーティンから直接curlで呼ぶ方式を試みたが、Claude Routineの実行環境は組織のegressポリシーでアウトバウンド接続先が許可リスト制になっており、この新しいドメインへの接続が403で拒否された。次に、LINE中継用で既に稼働実績のある`ns-line-relay`に`/chatwork/*`エンドポイントを追加して試したが、**同じドメインでも同様に403で拒否された**。これにより「ルーティンが外部ドメインを直接curlで呼ぶ」設計自体がこの実行環境では不可能と判明した
+3. そのため2026-08-05に、**Google Driveを中継地点にする元の設計に戻し**、GitHub Actionsが担っていた「Driveをポーリングして Chatworkへ配送する」役割だけを、`ns-line-relay`のCron Trigger(`scheduled`ハンドラ)に置き換えた。これが現在の構成。`ns-chatwork-relay`Worker、および`ns-line-relay`の`/chatwork/send`・`/chatwork/messages`エンドポイントは、この過程でできた未使用の残骸(削除して問題ない)
 
 ### 三幸さんが持つ3つのChatworkアカウント(2026-08-04時点で整理)
 
@@ -43,9 +51,9 @@ NS関連の通知・会話には、三幸さんの3つのChatworkアカウント
 |---|---|
 | Morning Brief (`morning_brief.yml`) | 2026-07-28停止。GitHub Actionsの`schedule`が数時間〜半日遅延する問題があり、Claude Routine版`news-info-channel-0700-jst`に置き換え |
 | Stock News (`stock_news.yml`) | 2026-07-23停止。Claude Routine版`kabu-check-*`と内容・時間帯が重複していたため |
-| Chatwork Relay (`chatwork_relay.yml`) | 2026-08-05停止。2026-08-03頃からGitHub ActionsのIPからのChatwork APIアクセスが403 Forbiddenで拒否されるようになり、中継が機能しなくなった。Cloudflare Worker(`ns-chatwork-relay`)経由の直接アクセスに置き換え |
+| Chatwork Relay (`chatwork_relay.yml`) | 2026-08-05停止。2026-08-03頃からGitHub ActionsのIPからのChatwork APIアクセスが403 Forbiddenで拒否されるようになり、中継が機能しなくなった。Cloudflare Worker(`ns-line-relay`)のCron Triggerに置き換え |
 
-> 補足: GitHub Actionsの`schedule`は混雑時の遅延に加え、2026-08-03頃からChatwork APIへのアクセス自体が403でブロックされる事象が発生した(原因未特定。GitHub Actionsの共有IPが何らかの理由でChatwork側に弾かれた可能性)。この経験から、**外部APIとの定期的なやり取りはGitHub Actionsではなく、Cloudflare Worker経由でClaude Routineから直接呼ぶ方式を基本とする**。
+> 補足: GitHub Actionsの`schedule`は混雑時の遅延に加え、2026-08-03頃からChatwork APIへのアクセス自体が403でブロックされる事象が発生した(原因未特定。GitHub Actionsの共有IPが何らかの理由でChatwork側に弾かれた可能性)。この経験から、**外部APIとの定期的なやり取りはGitHub Actionsに任せず、Cloudflare WorkerのCron Triggerを基本とする**(Claude Routineから直接外部ドメインをcurlで呼ぶ方式も、egressポリシーによりこの実行環境では不可能だったため不採用)。
 
 ## Claude Routine（claude.ai/code/routines、10個）
 
@@ -82,20 +90,21 @@ NS関連の通知・会話には、三幸さんの3つのChatworkアカウント
 
 ## 秘密情報の登録場所(値はここに書かない)
 
-**GitHub Secrets**(リポジトリ Settings → Secrets and variables → Actions。現在は`chatwork_relay.yml`が手動実行のみなので実質未使用、他の停止済みワークフロー用に残置):
+**GitHub Secrets**(リポジトリ Settings → Secrets and variables → Actions。全ワークフローが手動実行のみなので実質未使用、停止済みワークフロー用に残置):
 - `CHATWORK_API_TOKEN` / `CHATWORK_API_TOKEN_1129` / `CHATWORK_API_TOKEN_KABUNS`
 - `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GOOGLE_CALENDAR_ID`, `LINE_CHANNEL_ACCESS_TOKEN`
 
 **Cloudflare Worker `ns-line-relay` のsecret**(Cloudflareダッシュボード → 該当Worker → Settings → Variables and Secrets。**これが現在の本番経路**):
 - `LINE_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `ROUTINE_URL`, `ROUTINE_TOKEN`(LINE用、既存)
-- `RELAY_SECRET`: `/chatwork/*`エンドポイントへの認証用トークン(2026-08-05追加。Claude Routineのプロンプト内にも埋め込まれている)
-- `CHATWORK_API_TOKEN` / `CHATWORK_API_TOKEN_1129` / `CHATWORK_API_TOKEN_KABUNS`: 上記GitHub Secretsと同じ値(2026-08-05追加)
+- `CHATWORK_API_TOKEN` / `CHATWORK_API_TOKEN_1129` / `CHATWORK_API_TOKEN_KABUNS`: Chatwork⇔Drive中継(Cron Trigger)用
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN`: Drive読み書き用(2026-08-05追加。`setup/get_refresh_token.py`で三幸秀稔アカウントにログインして発行)
+- Cron Trigger: Settings → Triggers で5分おき(`*/5 * * * *`)に設定済み
 
 **Cloudflare Worker `ns-chatwork-relay`**: 一時的に作成したが許可リスト問題で未使用のまま。secretは登録済みだが呼び出されていない。将来的に削除して問題ない。
 
 ## 棚卸しメモ
 
-- 2026-08-05: GitHub ActionsからのChatwork APIアクセスが403で拒否される問題を受け、Chatwork中継をGoogle Drive+GitHub Actions方式からCloudflare Worker経由の直接方式に全面移行。当初は新規Worker(`ns-chatwork-relay`)を作ったが、Claude Routine実行環境のegressポリシー(接続先ドメイン許可リスト制)に阻まれ403に。既に許可リストに入っている`ns-line-relay`に`/chatwork/*`エンドポイントを追加する形に変更して解決。対象ルーティン9個すべてのプロンプトを更新し、`chatwork_relay.yml`の自動配信を停止。ルーティンからのGoogle Drive依存も、Chatwork中継目的だった分は不要になった(バックオフィス確認・請求書PDF読み取りなど本来の用途のみ残る)
+- 2026-08-05: GitHub ActionsからのChatwork APIアクセスが403で拒否される問題を受け、Chatwork中継の方式を2回作り直した。①新規Worker(`ns-chatwork-relay`)経由でルーティンから直接curl→Claude Routine実行環境のegressポリシー(接続先ドメイン許可リスト制)に阻まれ403。②既存の`ns-line-relay`に`/chatwork/*`を追加して直接curl→同じく403(ドメインの問題ではなく「ルーティンが外部ドメインを直接呼ぶこと自体」がこの環境では不可能と判明)。最終的に③Google Driveを中継地点にする元の設計に戻し、GitHub Actionsが担っていたポーリング役を`ns-line-relay`のCron Trigger(5分おき)に置き換えて解決。対象ルーティン9個すべてのプロンプトをDrive経由(`create_file`/`search_files`)の方式に更新し、`chatwork_relay.yml`の自動配信を停止(手動実行のみ残置)
 - 2026-08-04: 通知の送信元アカウントを整理。「1129」「株NS」それぞれ専用のChatworkトークンを取得し、三幸秀稔への1対1DM(room_id 443042144/443123712)はそのアカウント自身のトークンで送信するよう修正。kabu-check-*3本の送信先を株NSとのDM(443123712)に変更
 - 2026-07-22: NS Email Triageを新規作成(LINE直送方式)
 - 2026-07-23〜24: 別セッションでの作業により、Chatwork連携・株式レポート・経理/労務チェック・LINE会話機能などが追加。通知の主経路がLINEからChatworkへ移行
